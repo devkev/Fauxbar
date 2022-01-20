@@ -1,0 +1,4 @@
+#!/bin/bash
+
+base="$(git rev-parse --show-toplevel)"
+sed -e '/^\s*\/\/\/\//d' -e 's,////.*$,,' -e 's,\s*$,,' "$base"/Fauxbar/manifest.json.in | cat -s > "$base"/Fauxbar/manifest.json
