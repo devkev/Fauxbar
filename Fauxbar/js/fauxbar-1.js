@@ -1345,7 +1345,7 @@ $("#awesomeinput").live("focus", function(e){
 $("#opensearchinput").live("focus", function(e){
 	setTimeout(function(){
 		if (!window.justPasted && !window.justDeleted) {
-			$("#opensearchinput").select();
+			//$("#opensearchinput").select();
 		}
 		delete window.justPasted;
 		delete window.justDeleted;
