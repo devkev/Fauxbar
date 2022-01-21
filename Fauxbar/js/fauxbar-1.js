@@ -1336,7 +1336,7 @@ $("#awesomeinput").live("focus", function(e){
 	}
 	setTimeout(function(){
 		if (!window.justPasted && !window.justDeleted) {
-			$("#awesomeinput").select();
+			//$("#awesomeinput").select();
 		}
 		delete window.justPasted;
 		delete window.justDeleted;
