@@ -128,7 +128,38 @@ function goToUrl(url, fromClickedResult, dontResolve) {
 					url = $(".autofillmatch").attr("url");
 				}
 				else {
-					url = 'http://'+url;
+					var loaded = false;
+					var xhr = new XMLHttpRequest();
+					xhr.timeout = 1000;
+					xhr.ontimeout = function() {
+						// didn't get headers back after a reasonable amount of time, so just try http instead
+						if (!loaded) {
+							loaded = true;
+							console.log("timeout, going to ", 'http://'+url);
+							goToUrl('http://'+url, false, true);
+						}
+					};
+					xhr.onerror = function() {
+						// got an error (eg. conn refused), so just try http instead
+						if (!loaded) {
+							loaded = true;
+							console.log("error, going to ", 'http://'+url);
+							goToUrl('http://'+url, false, true);
+						}
+					};
+					xhr.onload = function() {
+						if (xhr.readyState >= 2) {
+							// we got headers, so the https url is valid, so actually load it
+							if (!loaded) {
+								loaded = true;
+								console.log("success, going to ", 'https://'+url);
+								goToUrl('https://'+url, false, true);
+							}
+						}
+					};
+					xhr.open('HEAD', 'https://'+url, true);
+					xhr.send();
+					return;
 				}
 				urlIsValid = true;
 			}
