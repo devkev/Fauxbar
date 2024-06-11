@@ -177,7 +177,13 @@ function goToUrl(url, fromClickedResult, dontResolve) {
 	if (!urlIsValid && !dontResolve && ( url.split(' ').length == 1 || strstr(url.split(' ')[0],'/'))) {
 		hideResults();
 		window.db.readTransaction(function(tx){
-			tx.executeSql('SELECT url FROM urls WHERE url LIKE ? LIMIT 1', ['http://'+url.split('/')[0]+'%'], function(tx, results){
+			//tx.executeSql('SELECT url FROM urls WHERE url LIKE ? LIMIT 1', ['http://'+url.split('/')[0]+'%'], function(tx, results){
+			tx.exec(
+				tx.query('urls')
+				.where( (row) => new RegExp("^http:\/\/" + url.split('/')[0]).test(row.url) )
+				.project('url')
+				.limit(1)
+				, function(tx, results){
 				if (results.rows.length > 0) {
 					// URL (or domain at least) exists; URL is valid
 					goToUrl('http://'+url, false, true);
@@ -1245,7 +1251,33 @@ $("#contextMenu .menuOption").live("mousedown", function(){
 function populateOpenSearchMenu(force) {
 	if (openDb(force)) {
 		window.db.readTransaction(function (tx) {
-			tx.executeSql('SELECT shortname, searchurl, method, suggestUrl, iconurl, isdefault, keyword, encoding FROM opensearches ORDER BY position DESC, shortname COLLATE NOCASE asc', [], function (tx, results) {
+			//tx.executeSql('SELECT shortname, searchurl, method, suggestUrl, iconurl, isdefault, keyword, encoding FROM opensearches ORDER BY position DESC, shortname COLLATE NOCASE asc', [], function (tx, results) {
+			tx.exec(
+				tx.query('opensearches')
+				.project(
+					'shortname',
+					'searchurl',
+					'method',
+					'suggestUrl',
+					'iconurl',
+					'isdefault',
+					'keyword',
+					'encoding',
+					)
+				.sort( (a, b) => {
+						if (a.position > b.position) {
+							return -1;
+						} else if (a.position < b.position) {
+							return 1;
+						}
+						if (a.shortname.toLocaleLowerCase() > b.shortname.toLocaleLowerCase()) {
+							return 1;
+						} else if (a.shortname.toLocaleLowerCase() < b.shortname.toLocaleLowerCase()) {
+							return -1;
+						}
+						return 0;
+					} )
+				, function (tx, results) {
 				var menuItems = '';
 				var len = results.rows.length, i;
 				var isDefault = false;
@@ -2687,7 +2719,71 @@ function getResults(noQuery) {
 					if (clearMenus) {
 						clearMenus();
 					}
-					!window.goingToUrl && tx.executeSql(selectStatement, urltitleWords, function (tx, results) {
+
+					// SELECT urls.url, title, type, frecency, urls.id, urls.tag,
+					//        (urls.url||" "||title||" "||urls.tag) AS urltitletag, tags.url*0 as tagscore
+					// FROM urls
+					// LEFT JOIN tags ON urls.url = tags.url AND tags.tag LIKE ?
+					// WHERE     urls.url != ""
+					//       AND ( type = 1  OR  type = 2  OR  type = -1 )
+					//       AND queuedfordeletion = 0
+					//       AND urltitletag LIKE ? ESCAPE "¸"
+					//       AND (title != "" OR urls.url LIKE "%.__" OR urls.url LIKE "%.___" OR urls.url LIKE "%.____" OR urls.url LIKE "%/")
+					// ORDER BY tagscore DESC, frecency DESC, type DESC
+					// LIMIT 20
+					//console.log(urltitleWords);
+
+					//!window.goingToUrl && tx.executeSql(selectStatement, urltitleWords, function (tx, results) {
+					// FIXME: won't work with tags, because the join isn't present.
+					!window.goingToUrl && tx.exec(
+						tx.query('urls')
+						.mapPre( (urlRow) => {
+								urlRow.urltitletag = `${urlRow.url} ${urlRow.title} ${urlRow.tag}`;
+								urlRow.tagscore = 0; // FIXME?
+								return urlRow;
+							} )
+						.select( (urlRow) => {
+								var matching = urlRow.url !== ''
+													&& (urlRow.type === 1 || urlRow.type === 2 || urlRow.type === -1)
+													&& (urlRow.queuedfordeletion === 0)
+													//&& ( urlRow.urltitletag.toLocaleLowerCase().startsWith(thisQuery.toLocaleLowerCase()) || words.some((word) => urlRow.urltitletag.toLocaleLowerCase().includes(word.toLocaleLowerCase()) ) )  // the first part of this is actually the one that should be applied to the tags.tag left join matching condition... right??
+													&& words.some((word) => urlRow.urltitletag.toLocaleLowerCase().includes(word.toLocaleLowerCase()) )
+													&& (urlRow.title !== '' || /\...$/.test(urlRow.url) || /\....$/.test(urlRow.url) || /\.....$/.test(urlRow.url) || /\/$/.test(urlRow.url))
+													;
+								//if (matching) {
+								//	console.log(matching, urlRow);
+								//}
+								return matching;
+							} )
+						.sort( (a, b) => {
+								if (a.tagscore > b.tagscore) {
+									return -1;
+								} else if (a.tagscore < b.tagscore) {
+									return 1;
+								}
+								if (a.frecency > b.frecency) {
+									return -1;
+								} else if (a.frecency < b.frecency) {
+									return 1;
+								}
+								if (a.type > b.type) {
+									return -1;
+								} else if (a.type < b.type) {
+									return 1;
+								}
+								return 0;
+							} )
+						.project(
+							"url",
+							"title",
+							"type",
+							"frecency",
+							"id",
+							"tag",
+							"urltitletag",
+							"tagscore")
+						.limit(20)
+						, function (tx, results) {
 
 						window.waitingForResults = false;
 						var len = results.rows.length, i;
@@ -3127,7 +3223,14 @@ function getResults(noQuery) {
 							// Ask Chrome to possibly pre-render a best-guess result for the user, based on the user's Address Box habits
 							if (!noQuery && localStorage.option_prerender == 1 && /*$(".switch").length == 0 &&*/ !window.tileEditMode && thisQuery == window.actualUserInput) {
 								window.db.transaction(function(tx){
-									tx.executeSql('SELECT url FROM inputurls WHERE input = ? LIMIT 1', [thisQuery.toLowerCase()], function(tx, results){
+									//tx.executeSql('SELECT url FROM inputurls WHERE input = ? LIMIT 1', [thisQuery.toLowerCase()], function(tx, results){
+									tx.exec(
+										tx.query('inputurls')
+										.select( (row) => row.input === thisQuery.toLowerCase() )
+										.project("url")
+										.limit(1)
+										, function(tx, results){
+										//console.log(results.rows);
 										if (results.rows.length == 1 && thisQuery == window.actualUserInput) {
 											var itemUrl = results.rows.item(0).url;
 											console.log("Requesting pre-render for "+itemUrl);

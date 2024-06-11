@@ -720,7 +720,13 @@ chrome.history.onVisited.addListener(function(historyItem) {
 			window.db.readTransaction(function (tx) {
 
 				// See if it exists...
-				tx.executeSql('SELECT url FROM urls WHERE url = ? AND type = 1 AND queuedfordeletion = 0 LIMIT 1', [historyItem.url], function(tx, results){
+				//tx.executeSql('SELECT url FROM urls WHERE url = ? AND type = 1 AND queuedfordeletion = 0 LIMIT 1', [historyItem.url], function(tx, results){
+				tx.exec(
+					tx.query('urls')
+					.project('url')
+					.filter( (row) => row.url === historyItem.url && type === 1 && row.queuedfordeletion === 0 )
+					.limit(1)
+					, function(tx, results){
 					var len = results.rows.length, i;
 
 					// If URL doesn't exist in Fauxbar's database, add it
@@ -745,7 +751,13 @@ chrome.history.onVisited.addListener(function(historyItem) {
 						chrome.history.getVisits({url:historyItem.url}, function(visitItems){
 							visitItems.reverse();
 							window.db.transaction(function (tx) {
-								tx.executeSql('SELECT typedVisitIds FROM urls WHERE url = ? LIMIT 1', [historyItem.url], function(tx, results) {
+								//tx.executeSql('SELECT typedVisitIds FROM urls WHERE url = ? LIMIT 1', [historyItem.url], function(tx, results) {
+								tx.exec(
+									tx.query('urls')
+									.project('typedVisitIds')
+									.filter( (row) => row.url === historyItem.url )
+									.limit(1)
+									, function(tx, results) {
 									var frecency = calculateFrecency(visitItems, results.rows.length ? results.rows.item(0).typedVisitIds+visitId : visitId);
 									tx.executeSql('UPDATE urls SET frecency = ?, typedVisitIds = (typedVisitIds||?) WHERE url = ?', [frecency, visitId, historyItem.url]);
 									tx.executeSql('UPDATE urls SET title = ? WHERE url = ? AND type = 1', [historyItem.title, historyItem.url]);
@@ -756,7 +768,22 @@ chrome.history.onVisited.addListener(function(historyItem) {
 							}, reapplyKeywords);
 						});
 					}
-					tx.executeSql('SELECT frecency FROM urls WHERE type = 1 ORDER BY frecency DESC LIMIT 50,50', [], function(tx, results){
+					//tx.executeSql('SELECT frecency FROM urls WHERE type = 1 ORDER BY frecency DESC LIMIT 50,50', [], function(tx, results){
+					tx.exec(
+						tx.query('urls')
+						.project('frecency')
+						.filter( (row) => row.type === 1 )
+						.sort( (a, b) => {
+							if (a.frecency > b.frecency) {
+								return -1;
+							} else if (a.frecency < b.frecency) {
+								return 1;
+							}
+							return 0;
+						} )
+						.limit(50)
+						.skip(50)
+						, function(tx, results){
 						if (results.rows.length > 0) {
 							window.frecencyThreshold = results.rows.item(0).frecency;
 						} else {
@@ -947,19 +974,27 @@ setTimeout(function(){
 	}
 	if (localStorage.indexedbefore == 1 && openDb()) {
 		window.db.readTransaction(function(tx){
-			tx.executeSql('SELECT * FROM opensearches LIMIT 1', [], function(tx, engines){
+			//tx.executeSql('SELECT * FROM opensearches LIMIT 1', [], function(tx, engines){
+			tx.exec(tx.query('opensearches').limit(1), function(tx, engines){
 				// There should always be at least one search engine, so if there's none, DB is corrupt
 				if (!engines.rows.length) {
+					console.log("RUH ROH: zero engines");
 					localStorage.issue47 = 1;
 					chrome.tabs.create({url:chrome.extension.getURL("/html/issue47.html"), selected:true});
 					return true;
 				}
-				tx.executeSql('SELECT * FROM urls LIMIT 1', [], function(tx, urls){
-					tx.executeSql('SELECT * FROM inputurls LIMIT 1', [], function(tx, inputurls){
-						tx.executeSql('SELECT * FROM tags LIMIT 1', [], function(tx, tags){
-							tx.executeSql('SELECT * FROM errors LIMIT 1', [], function(tx, errors){
-								tx.executeSql('SELECT * FROM thumbs LIMIT 1', [], function(tx, thumbs){
-									tx.executeSql('SELECT * FROM searchqueries LIMIT 1', [], function(tx, queries){
+				//tx.executeSql('SELECT * FROM urls LIMIT 1', [], function(tx, urls){
+				tx.exec(tx.query('urls').limit(1), function(tx, urls){
+					//tx.executeSql('SELECT * FROM inputurls LIMIT 1', [], function(tx, inputurls){
+					tx.exec(tx.query('inputurls').limit(1), function(tx, inputurls){
+						//tx.executeSql('SELECT * FROM tags LIMIT 1', [], function(tx, tags){
+						tx.exec(tx.query('tags').limit(1), function(tx, tags){
+							//tx.executeSql('SELECT * FROM errors LIMIT 1', [], function(tx, errors){
+							tx.exec(tx.query('errors').limit(1), function(tx, errors){
+								//tx.executeSql('SELECT * FROM thumbs LIMIT 1', [], function(tx, thumbs){
+								tx.exec(tx.query('thumbs').limit(1), function(tx, thumbs){
+									//tx.executeSql('SELECT * FROM searchqueries LIMIT 1', [], function(tx, queries){
+									tx.exec(tx.query('searchqueries').limit(1), function(tx, queries){
 
 									});
 								});
@@ -970,6 +1005,7 @@ setTimeout(function(){
 			});
 		}, function(){
 			// If one of the tables above doesn't exist, DB is corrupt
+			console.log("RUH ROH: something else");
 			localStorage.issue47 = 1;
 			chrome.tabs.create({url:chrome.extension.getURL("/html/issue47.html"), selected:true});
 		}, function(){
@@ -1666,7 +1702,8 @@ function calculateFrecency(visitItems, typedVisitIds) {
 function reapplyKeywords() {
 	if (openDb()) {
 		window.db.transaction(function(tx){
-			tx.executeSql('SELECT * FROM tags', [], function(tx, results) {
+			//tx.executeSql('SELECT * FROM tags', [], function(tx, results) {
+			tx.exec(tx.query('tags'), function(tx, results) {
 				for (var i = 0; i < results.rows.length; i++) {
 					var item = results.rows.item(i);
 					tx.executeSql('UPDATE urls SET tag = ? WHERE url = ?', [item.tag, item.url]);
@@ -1701,7 +1738,13 @@ function captureScreenshot(sender) {
 		window.db.transaction(function(tx){
 
 			// Check to see if page is a top site
-			tx.executeSql('SELECT frecency FROM urls WHERE url = ? LIMIT 1', [sender.tab.url], function(tx, results){
+			//tx.executeSql('SELECT frecency FROM urls WHERE url = ? LIMIT 1', [sender.tab.url], function(tx, results){
+			tx.exec(
+				tx.query('urls')
+				.project('frecency')
+				.filter( (row) => row.url === sender.tab.url )
+				.limit(1)
+				, function(tx, results){
 
 				// Check to see if URL is a user-chosen site tile
 				var urlIsManualTile = false;
@@ -1775,7 +1818,10 @@ function captureScreenshot(sender) {
 function backupKeywords() {
 	if (localStorage.issue47 != 1 && openDb()) {
 		window.db.readTransaction(function(tx){
-			tx.executeSql('SELECT * FROM tags', [], function(tx, results){
+			//tx.executeSql('SELECT * FROM tags', [], function(tx, results){
+			tx.exec(
+				tx.query('tags')
+				, function(tx, results){
 				if (results.rows.length > 0) {
 					var tags = [];
 					for (var x = 0; x < results.rows.length; x++) {
@@ -1799,7 +1845,10 @@ function backupKeywords() {
 function backupSearchEngines() {
 	if (localStorage.issue47 != 1 && openDb()) {
 		window.db.readTransaction(function(tx){
-			tx.executeSql('SELECT * FROM opensearches', [], function(tx, results){
+			//tx.executeSql('SELECT * FROM opensearches', [], function(tx, results){
+			tx.exec(
+				tx.query('opensearches')
+				, function(tx, results){
 				if (results.rows.length > 0) {
 					var engines = [];
 					for (var x = 0; x < results.rows.length; x++) {
