@@ -290,4 +290,4 @@ function logError(msg, file, line) {
 		}
 	}
 }
-window.onerror = logError;
+//window.onerror = logError;

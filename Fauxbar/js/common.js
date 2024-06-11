@@ -240,6 +240,113 @@ function urldecode (str) {
 	}
 }
 
+class QuerySpec {
+	_collectionName;
+	_mapPreFn = [];
+	_filterFn = [];
+	_sortFn;
+	_mapPostFn = [];
+	_overallFn = [];
+	_limit = -1;
+	_skip = -1;
+
+	constructor(collectionName) {
+		this._collectionName = collectionName;
+	}
+
+	filter(filterFn) {
+		this._filterFn.push(filterFn);
+		return this;
+	}
+	select = this.filter;
+	where = this.filter;
+
+	mapPre(mapPreFn) {
+		this._mapPreFn.push(mapPreFn);
+		return this;
+	}
+
+	sort(sortFn) {
+		this._sortFn = sortFn;
+		return this;
+	}
+
+	mapPost(mapPostFn) {
+		this._mapPostFn.push(mapPostFn);
+		return this;
+	}
+
+	project(...args) {
+		return this.mapPost(
+			(row) => {
+				var result = {};
+				for (var arg of args) {
+					result[arg] = row[arg];
+				}
+				return result;
+			}
+		);
+	}
+
+	finalProcessing(overallFn) {
+		this._overallFn.push(overallFn);
+		return this;
+	}
+
+	limit(limit) {
+		this._limit = limit;
+		return this;
+	}
+
+	skip(skip) {
+		this._skip = skip;
+		return this;
+	}
+	offset = this.skip;
+
+	exec(tx) {
+		console.log(`selecting from ${this._collectionName} with ${tx.backgroundWindow.data[this._collectionName].length} entries`);
+		var results = tx.backgroundWindow.data[this._collectionName].slice();
+		for (var mapPreFn of this._mapPreFn) {
+			results = results.map(mapPreFn);
+		}
+		for (var filterFn of this._filterFn) {
+			results = results.filter(filterFn);
+		}
+		if (this._sortFn) {
+			results = results.sort(this._sortFn);
+		}
+		for (var mapPostFn of this._mapPostFn) {
+			results = results.map(mapPostFn);
+		}
+		for (var overallFn of this._overallFn) {
+			results = overallFn(results);
+		}
+		if (this._skip > 0) {
+			results = results.slice(this._skip);
+		}
+		if (this._limit > 0) {
+			results = results.slice(0, this._limit);
+		}
+		console.log(`got ${results.length} results`);
+		results.item = results.at;
+		return { rows: results };
+	}
+}
+
+function loadStaticData(backgroundWindow, name) {
+	if (!backgroundWindow.data[name]) {
+		$.getJSON(chrome.extension.getURL('/data/' + name + '.json'), function(json) {
+				if (json === null) {
+					json = [];
+				}
+				backgroundWindow.data[name] = json;
+				console.log("loaded", name, backgroundWindow.data[name].length);
+			});
+		console.log("scheduled", name);
+	}
+}
+
 // Initialize/create the database
 function openDb(force) {
 	// Don't load database if page isn't ready
@@ -247,18 +354,90 @@ function openDb(force) {
 		return false;
 	}
 	var backgroundWindow = chrome.extension.getBackgroundPage();
-	if (!backgroundWindow.db) {
-		backgroundWindow.db = openDatabase('fauxbar', '1.0', 'Fauxbar data', 100 * 1024 * 1024);
-	}
 
+	console.trace("openDb", backgroundWindow.data);
+	if (!backgroundWindow.data) {
+		backgroundWindow.data = {};
+	}
+	for (var i of ["urls", "inputurls", "opensearches", "searchqueries", "thumbs", "tags", "errors"]) {
+		loadStaticData(backgroundWindow, i);
+	}
+	window.data = backgroundWindow.data;
+
+	if (!backgroundWindow.db) {
+		backgroundWindow._tx = {
+			backgroundWindow: backgroundWindow,
+			executeSql: function(sql, args, cb, err) {
+				console.trace("executeSql", arguments);
+			},
+			exec: function(spec, cb, err) {
+				const tx = backgroundWindow._tx;
+				try {
+					var result = spec.exec(tx, cb);
+					cb(tx, result);
+				} catch(e) {
+					if (err) {
+						console.trace('generic error', e);
+						tx.e = e;
+						err(tx, e);
+					} else {
+						throw(e);
+					}
+				}
+			},
+			query: function(collectionName) {
+				return new QuerySpec(collectionName);
+			},
+			insert: function(collectionName) {
+				// FIXME
+			},
+			delete: function(collectionName) {
+				// FIXME
+			},
+			update: function(collectionName) {
+				// FIXME
+			},
+		};
+		backgroundWindow.db = {
+			readTransaction: function(fn, err, success) {
+				console.trace("readTransaction", arguments);
+				const tx = backgroundWindow._tx;
+				try {
+					fn(tx);
+					if (success) success(tx);
+				} catch(e) {
+					if (err) {
+						console.trace('generic error', e);
+						tx.e = e;
+						err(tx);
+					} else {
+						throw(e);
+					}
+				}
+			},
+			transaction: function(fn, err, success) {
+				console.trace("transaction", arguments);
+				const tx = backgroundWindow._tx;
+				try {
+					fn(tx);
+					if (success) success(tx);
+				} catch(e) {
+					if (err) {
+						console.trace('generic error', e);
+						tx.e = e;
+						err(tx);
+					} else {
+						throw(e);
+					}
+				}
+			},
+		};
+	}
 	window.db = backgroundWindow.db;
-	if (window.db) {
-		return localStorage.indexComplete == 1 || force == true;
-	}
-	else {
-		alert("Fauxbar error: Unable to create or open Fauxbar's SQLite database.");
-		return false;
-	}
+
+	var res = localStorage.indexComplete == 1 || force == true;
+	console.log("openDb done", res);
+	return res;
 }
 
 // errorHandler catches errors when SQL statements don't work.
@@ -266,37 +445,6 @@ function openDb(force) {
 // lineInfo contains contains the line number and filename for where the error came from
 function errorHandler(transaction, lineInfo) {
 	if (!window.goingToUrl) {
-		if (transaction.message) {
-			var code = '';
-			switch (transaction.code) {
-				case 1:
-					code = "database";
-					break;
-				case 2:
-					code = "version";
-					break;
-				case 3:
-					code = '"too large"';
-					break;
-				case 4:
-					code = "quota";
-					break;
-				case 5:
-					code = "syntax";
-					break;
-				case 6:
-					code = "constraint";
-					break;
-				case 7:
-					code = "timeout";
-					break;
-				default: // case 0:
-					break;
-			}
-			var errorMsg = 'SQL '+code+' error: "'+transaction.message+'"';
-			logError(errorMsg, lineInfo.file, lineInfo.line);
-		} else {
-			logError('Generic SQL error (no transaction)', lineInfo.file, lineInfo.line);
-		}
+		console.trace('generic error', transaction.e);
 	}
 }
