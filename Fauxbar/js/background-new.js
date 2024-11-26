@@ -979,8 +979,8 @@ setTimeout(function(){
 				// There should always be at least one search engine, so if there's none, DB is corrupt
 				if (!engines.rows.length) {
 					console.log("RUH ROH: zero engines");
-					localStorage.issue47 = 1;
-					chrome.tabs.create({url:chrome.extension.getURL("/html/issue47.html"), selected:true});
+					//localStorage.issue47 = 1;
+					//chrome.tabs.create({url:chrome.extension.getURL("/html/issue47.html"), selected:true});
 					return true;
 				}
 				//tx.executeSql('SELECT * FROM urls LIMIT 1', [], function(tx, urls){
@@ -1006,8 +1006,8 @@ setTimeout(function(){
 		}, function(){
 			// If one of the tables above doesn't exist, DB is corrupt
 			console.log("RUH ROH: something else");
-			localStorage.issue47 = 1;
-			chrome.tabs.create({url:chrome.extension.getURL("/html/issue47.html"), selected:true});
+			//localStorage.issue47 = 1;
+			//chrome.tabs.create({url:chrome.extension.getURL("/html/issue47.html"), selected:true});
 		}, function(){
 			// But if DB seems fine, backup keywords and search engines to local storage
 			if (localStorage.issue47 != 1) {
