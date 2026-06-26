@@ -76,56 +76,28 @@ function enableHelper() {
 
 // Fill the Management Options' "Backup..." textarea with the user's localStorage options in JSON format
 function showBackupInfo() {
-	if (openDb()) {
-		window.db.readTransaction(function(tx) {
-			tx.executeSql('SELECT * FROM opensearches', [], function(tx, results) {
-				tx.executeSql('SELECT * FROM tags', [], function(tx, results2) {
-					var backup = {};
-					backup.options = {};
-					var ls = localStorage;
-					var keys = sortKeys(ls).sort();
-					for (var key in keys) {
-						if (keys[key] != "customStyles") {
-							backup.options[keys[key]] = localStorage[keys[key]];
-						}
-					}
-
-					backup.searchengines = [];
-					var len = results.rows.length, i;
-					if (len > 0) {
-						var i = 0;
-						for (i = 0; i < len; i++) {
-							backup.searchengines[i] = results.rows.item(i);
-						}
-					}
-
-					backup.tags = [];
-					var len2 = results2.rows.length, i2;
-					if (len2 > 0) {
-						var i2 = 0;
-						for (i2 = 0; i2 < len2; i2++) {
-							backup.tags[i2] = results2.rows.item(i2);
-						}
-					}
-
-					$("#restoreinfo").css("display","none");
-					$("#backupinfo").css("display","block");
-					var backupText = JSON.stringify(backup);
-					backupText = str_replace('","', '",\n"', backupText);
-					backupText = str_replace('":{"', '": {\n"', backupText);
-					backupText = str_replace('"},"', '"},\n\n"', backupText);
-					backupText = str_replace('":[{"', '": [\n{"', backupText);
-					backupText = str_replace('"shortname":', '\n\n"shortname":', backupText);
-					backupText = str_replace(',"tags": [', ',\n\n"tags": [', backupText);
-					backupText = str_replace('"},{"url":"', '"},\n{"url":"', backupText);
-					backupText = str_replace('",\n"tag":"', '","tag":"', backupText);
-					$("#backup").text(backupText).select();
-				});
-			});
-		}, function(t){
-			errorHandler(t, getLineInfo());
-		});
+	var backup = {};
+	backup.options = {};
+	var ls = localStorage;
+	var keys = sortKeys(ls).sort();
+	for (var key in keys) {
+		if (keys[key] != "customStyles") {
+			backup.options[keys[key]] = localStorage[keys[key]];
+		}
 	}
+
+	$("#restoreinfo").css("display","none");
+	$("#backupinfo").css("display","block");
+	var backupText = JSON.stringify(backup);
+	backupText = str_replace('","', '",\n"', backupText);
+	backupText = str_replace('":{"', '": {\n"', backupText);
+	backupText = str_replace('"},"', '"},\n\n"', backupText);
+	backupText = str_replace('":[{"', '": [\n{"', backupText);
+	backupText = str_replace('"shortname":', '\n\n"shortname":', backupText);
+	backupText = str_replace(',"tags": [', ',\n\n"tags": [', backupText);
+	backupText = str_replace('"},{"url":"', '"},\n{"url":"', backupText);
+	backupText = str_replace('",\n"tag":"', '","tag":"', backupText);
+	$("#backup").text(backupText).select();
 }
 
 // Show the Management Options' "Restore..." box prompt
@@ -151,39 +123,15 @@ function restoreOptions() {
 	}, 500);
 	window.restoreIsOkay = false;
 	var text = jQuery.parseJSON($("#restore").val());
-	if (text && text.options && text.searchengines) {
+	if (text && text.options) {
 		window.restoreIsOkay = true;
 		for (var o in text.options) {
 			if (o != "extensionName") {
 				localStorage[o] = text.options[o];
 			}
 		}
-		if (openDb()) {
-			window.db.transaction(function(tx){
-				tx.executeSql('DELETE FROM opensearches');
-				for (var s in text.searchengines) {
-					var se = text.searchengines[s];
-					tx.executeSql('INSERT INTO opensearches (shortname, iconurl, searchurl, xmlurl, xml, isdefault, method, position, suggestUrl, keyword, encoding) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-						[se.shortname, se.iconurl, se.searchurl, se.xmlurl, se.xml, se.isdefault, se.method, se.position, se.suggestUrl, se.keyword, se.encoding]);
-				}
-				for (var t in text.tags) {
-					var tag = text.tags[t];
-					tx.executeSql('DELETE FROM tags WHERE url = ?', [tag.url]);
-					tx.executeSql('UPDATE urls SET tag = ? WHERE url = ?', [tag.tag, tag.url]);
-					tx.executeSql('INSERT INTO tags (url, tag) VALUES (?, ?)', [tag.url, tag.tag]);
-				}
-			}, function(t){
-				errorHandler(t, getLineInfo());
-			}, function(){
-				chrome.runtime.sendMessage(null, "backup keywords");
-				chrome.runtime.sendMessage(null, "backup search engines");
-				alert("The import was successful.\n\nFauxbar will now restore your options.");
-				window.location.reload();
-			});
-		} else {
-			alert("Uh-oh! Fauxbar is unable to open its database to restore your search engines, but your other options will be restored.");
-			window.location.reload();
-		}
+		alert("The import was successful.\n\nFauxbar will now restore your options.");
+		window.location.reload();
 	}
 }
 
